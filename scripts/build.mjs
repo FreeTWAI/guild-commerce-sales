@@ -5,7 +5,13 @@ import {execFileSync} from 'node:child_process';
 
 const actions = ['skills', 'tools', 'work', 'information'];
 const text = (value, maximum) => typeof value === 'string' && value.trim().length > 0 && value.length <= maximum && !/[\u0000-\u001f\u007f]/.test(value);
-const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+const exact = (value, keys) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const vKeys = Object.keys(value);
+  if (vKeys.length !== keys.length) return false;
+  for (let i = 0; i < keys.length; i++) if (!Object.hasOwn(value, keys[i])) return false;
+  return true;
+};
 export function validateWorkspace(value) {
   if (!exact(value, ['schema_version', 'guild_key', 'name', 'repository', 'headline', 'purpose', 'outcome', 'steps'])
     || value.schema_version !== 'freedom.guild-workspace/v1'
@@ -18,11 +24,33 @@ export function validateWorkspace(value) {
   }
   return value;
 }
-export const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[char]));
+export const escapeHtml = value => {
+  const s = String(value);
+  const match = /[&<>"']/.exec(s);
+  if (!match) return s;
+  let out = '';
+  let last = 0;
+  for (let i = match.index; i < s.length; i++) {
+    switch (s.charCodeAt(i)) {
+      case 38: out += s.substring(last, i) + '&amp;'; last = i + 1; break;
+      case 60: out += s.substring(last, i) + '&lt;'; last = i + 1; break;
+      case 62: out += s.substring(last, i) + '&gt;'; last = i + 1; break;
+      case 34: out += s.substring(last, i) + '&quot;'; last = i + 1; break;
+      case 39: out += s.substring(last, i) + '&#39;'; last = i + 1; break;
+    }
+  }
+  return last === 0 ? s : out + s.substring(last);
+};
 const href = (workspace, action) => `https://freetwai.com/#guilds/${workspace.guild_key}/${action}`;
+const actionLabels = {skills: '開啟技能書', tools: '查看可用工具', work: '開啟我的工作', information: '閱讀公會資訊'};
 export function renderWorkspace(workspace) {
   validateWorkspace(workspace);
   const e = escapeHtml;
+  let stepsHtml = '';
+  for (let index = 0; index < workspace.steps.length; index++) {
+    const step = workspace.steps[index];
+    stepsHtml += `<li><span class="step-number" aria-hidden="true">0${index + 1}</span><h2>${e(step.title)}</h2><p>${e(step.detail)}</p><a data-action="${step.action}" href="${href(workspace, step.action)}">${actionLabels[step.action]} <span aria-hidden="true">→</span></a></li>`;
+  }
   return `<!doctype html>
 <html lang="zh-Hant" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
@@ -30,7 +58,7 @@ export function renderWorkspace(workspace) {
 <body><main id="workspace"><header class="standalone-header"><a href="https://freetwai.com/" aria-label="自由工坊"><img src="./brand.png" width="132" height="44" alt="自由工坊"></a><span>${e(workspace.name)}</span></header>
 <section class="intro"><p class="eyebrow">從想法到成果</p><h1>${e(workspace.headline)}</h1><p class="purpose">${e(workspace.purpose)}</p>
 <div class="actions"><a class="button primary" data-action="work" href="${href(workspace, 'work')}">進入工作區 <span aria-hidden="true">↗</span></a><a class="button secondary" data-action="skills" href="${href(workspace, 'skills')}">閱讀技能書</a></div></section>
-<ol class="journey" aria-label="公會實作流程">${workspace.steps.map((step, index) => `<li><span class="step-number" aria-hidden="true">0${index + 1}</span><h2>${e(step.title)}</h2><p>${e(step.detail)}</p><a data-action="${step.action}" href="${href(workspace, step.action)}">${({skills: '開啟技能書', tools: '查看可用工具', work: '開啟我的工作', information: '閱讀公會資訊'})[step.action]} <span aria-hidden="true">→</span></a></li>`).join('')}</ol>
+<ol class="journey" aria-label="公會實作流程">${stepsHtml}</ol>
 <aside class="outcome"><span class="outcome-icon" aria-hidden="true">✦</span><div><p class="eyebrow">這次留下的成果</p><p>${e(workspace.outcome)}</p></div></aside>
 <footer class="standalone-footer"><a href="https://github.com/${workspace.repository}">參與編修</a><span id="release"></span></footer></main></body></html>`;
 }
